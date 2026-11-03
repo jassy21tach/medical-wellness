@@ -1,0 +1,104 @@
+// Medical Wellness — Prisma schema (PostgreSQL 16)
+// See docs/DATABASE.md for the full relational design.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  RECEPTION
+}
+
+enum AppointmentSource {
+  PHONE
+  IN_PERSON
+  WHATSAPP
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  role         UserRole @default(RECEPTION)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  appointmentsCreated Appointment[] @relation("AppointmentCreator")
+
+  @@index([role])
+  @@index([active])
+  @@map("users")
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  phone     String
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  appointments Appointment[]
+
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@index([email])
+  @@map("clients")
+}
+
+model Employee {
+  id        String   @id @default(uuid())
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  appointments Appointment[]
+
+  @@index([lastName, firstName])
+  @@index([active])
+  @@map("employees")
+}
+
+model Appointment {
+  id          String            @id @default(uuid())
+  clientId    String            @map("client_id")
+  employeeId  String            @map("employee_id")
+  createdById String            @map("created_by_id")
+  startAt     DateTime          @map("start_at") @db.Timestamptz(3)
+  endAt       DateTime          @map("end_at") @db.Timestamptz(3)
+  source      AppointmentSource
+  status      AppointmentStatus @default(SCHEDULED)
+  notes       String?
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("AppointmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, startAt, endAt])
+  @@index([clientId, startAt])
+  @@index([status, startAt])
+  @@index([startAt])
+  @@index([createdById])
+  @@map("appointments")
+}

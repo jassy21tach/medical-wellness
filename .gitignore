@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.log
+.prisma
+.prisma/client/index.d.ts
