@@ -17,51 +17,42 @@ type Tx = {
   $executeRaw: PrismaService["$executeRaw"];
 };
 
-function parseDate(value: string, field: string): Date {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+function toDate(value: string, field: string): Date {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) {
     throw new BadRequestException(`Invalid date for ${field}`);
   }
-  return date;
+  return d;
 }
 
-function assertValidRange(startAt: Date, endAt: Date): void {
-  if (!(endAt.getTime() > startAt.getTime())) {
+function checkRange(start: Date, end: Date) {
+  if (end.getTime() <= start.getTime()) {
     throw new BadRequestException("endAt must be later than startAt");
   }
 }
 
-async function assertClientExists(tx: Tx, clientId: string): Promise<void> {
-  const client = await tx.client.findUnique({
+async function checkClient(tx: Tx, clientId: string) {
+  const c = await tx.client.findUnique({
     where: { id: clientId },
     select: { id: true },
   });
-  if (!client) {
-    throw new BadRequestException("Client not found");
-  }
+  if (!c) throw new BadRequestException("Client not found");
 }
 
-async function assertActiveEmployee(tx: Tx, employeeId: string): Promise<void> {
-  const employee = await tx.employee.findUnique({ where: { id: employeeId } });
-  if (!employee) {
-    throw new BadRequestException("Employee not found");
-  }
-  if (!employee.active) {
-    throw new BadRequestException("Employee is inactive");
-  }
+async function checkEmployee(tx: Tx, employeeId: string) {
+  const emp = await tx.employee.findUnique({ where: { id: employeeId } });
+  if (!emp) throw new BadRequestException("Employee not found");
+  if (!emp.active) throw new BadRequestException("Employee is inactive");
 }
 
-/**
- * Overlap check: cancelled appointments never block.
- * Two half-open intervals [start, end) overlap iff existing.start < new.end AND existing.end > new.start.
- * Boundary contact (existing.end == new.start) is allowed.
- */
-async function findOverlapping(
+// cancelled ones dont block anything
+// 10-11 and 11-12 is fine (touching is not overlapping)
+async function checkOverlap(
   tx: Tx,
   employeeId: string,
   startAt: Date,
   endAt: Date,
-  excludeAppointmentId?: string,
+  ignoreId?: string,
 ) {
   const where: Prisma.AppointmentWhereInput = {
     employeeId,
@@ -69,32 +60,15 @@ async function findOverlapping(
     startAt: { lt: endAt },
     endAt: { gt: startAt },
   };
-  if (excludeAppointmentId) {
-    where.id = { not: excludeAppointmentId };
-  }
-  return tx.appointment.findFirst({
+  if (ignoreId) where.id = { not: ignoreId };
+
+  const found = await tx.appointment.findFirst({
     where,
     select: { id: true, startAt: true, endAt: true, status: true },
   });
-}
-
-async function assertNoOverlap(
-  tx: Tx,
-  employeeId: string,
-  startAt: Date,
-  endAt: Date,
-  excludeAppointmentId?: string,
-): Promise<void> {
-  const overlapping = await findOverlapping(
-    tx,
-    employeeId,
-    startAt,
-    endAt,
-    excludeAppointmentId,
-  );
-  if (overlapping) {
+  if (found) {
     throw new ConflictException(
-      `Employee already has an overlapping appointment (${overlapping.id})`,
+      `Employee already has an overlaping appointment (${found.id})`,
     );
   }
 }
@@ -104,10 +78,10 @@ export class AppointmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateAppointmentDto, createdById: string) {
-    // TODO: validate working hours / slot granularity (business rule not confirmed yet)
-    const startAt = parseDate(dto.startAt, "startAt");
-    const endAt = parseDate(dto.endAt, "endAt");
-    assertValidRange(startAt, endAt);
+    // TODO working hours check, waiting for the client to tell us
+    const startAt = toDate(dto.startAt, "startAt");
+    const endAt = toDate(dto.endAt, "endAt");
+    checkRange(startAt, endAt);
 
     const status = dto.status ?? AppointmentStatus.SCHEDULED;
     if (status === AppointmentStatus.CANCELLED) {
@@ -118,15 +92,12 @@ export class AppointmentsService {
 
     return this.prisma.$transaction(
       async (tx) => {
-        // Serialize per-employee creation to prevent race conditions where two
-        // concurrent requests reserve the same employee/time.
-        // hashtextextended(text, seed) returns a bigint suitable for pg_advisory_xact_lock.
-
+        // lock per employee so 2 requests at the same time cant take the same slot
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${dto.employeeId}, 0))`;
 
-        await assertClientExists(tx, dto.clientId);
-        await assertActiveEmployee(tx, dto.employeeId);
-        await assertNoOverlap(tx, dto.employeeId, startAt, endAt);
+        await checkClient(tx, dto.clientId);
+        await checkEmployee(tx, dto.employeeId);
+        await checkOverlap(tx, dto.employeeId, startAt, endAt);
 
         return tx.appointment.create({
           data: {
@@ -139,7 +110,13 @@ export class AppointmentsService {
             status,
             notes: dto.notes?.trim() || null,
           },
-          include: { client: true, employee: true, createdBy: true },
+          include: {
+            client: true,
+            employee: true,
+            createdBy: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
         });
       },
       { timeout: 10000 },
@@ -164,13 +141,14 @@ export class AppointmentsService {
     if (query.clientId) where.clientId = query.clientId;
     if (query.status) where.status = query.status;
 
-    const from = query.from ? parseDate(query.from, "from") : undefined;
-    const to = query.to ? parseDate(query.to, "to") : undefined;
+    const from = query.from ? toDate(query.from, "from") : undefined;
+    const to = query.to ? toDate(query.to, "to") : undefined;
     if (from && to && to.getTime() <= from.getTime()) {
       throw new BadRequestException("to must be later than from");
     }
+
+    // anything that touches the [from, to] window
     if (from || to) {
-      // Overlap semantics: appointment interval [startAt, endAt) intersects [from, to).
       where.AND = [
         ...(from ? [{ endAt: { gt: from } }] : []),
         ...(to ? [{ startAt: { lt: to } }] : []),
@@ -181,25 +159,28 @@ export class AppointmentsService {
       this.prisma.appointment.findMany({
         where,
         include: { client: true, employee: true },
-        orderBy: [{ startAt: "asc" }],
+        orderBy: { startAt: "asc" },
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.appointment.count({ where }),
     ]);
 
+    // console.log("appointments", data.length);
     return paginate(data, total, { page, limit });
   }
 
   async findOne(id: string) {
-    const appointment = await this.prisma.appointment.findUnique({
+    const appt = await this.prisma.appointment.findUnique({
       where: { id },
-      include: { client: true, employee: true, createdBy: true },
+      include: {
+        client: true,
+        employee: true,
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
+      },
     });
-    if (!appointment) {
-      throw new NotFoundException("Appointment not found");
-    }
-    return appointment;
+    if (!appt) throw new NotFoundException("Appointment not found");
+    return appt;
   }
 
   async update(id: string, dto: UpdateAppointmentDto) {
@@ -212,47 +193,43 @@ export class AppointmentsService {
     return this.prisma.$transaction(
       async (tx) => {
         const existing = await tx.appointment.findUnique({ where: { id } });
-        if (!existing) {
-          throw new NotFoundException("Appointment not found");
-        }
+        if (!existing) throw new NotFoundException("Appointment not found");
 
         if (existing.status === AppointmentStatus.CANCELLED) {
           throw new ConflictException("Cannot update a cancelled appointment");
         }
 
-        const nextClientId = dto.clientId ?? existing.clientId;
-        const nextEmployeeId = dto.employeeId ?? existing.employeeId;
-        const nextStartAt = dto.startAt
-          ? parseDate(dto.startAt, "startAt")
+        const clientId = dto.clientId ?? existing.clientId;
+        const employeeId = dto.employeeId ?? existing.employeeId;
+        const startAt = dto.startAt
+          ? toDate(dto.startAt, "startAt")
           : existing.startAt;
-        const nextEndAt = dto.endAt
-          ? parseDate(dto.endAt, "endAt")
-          : existing.endAt;
-        assertValidRange(nextStartAt, nextEndAt);
+        const endAt = dto.endAt ? toDate(dto.endAt, "endAt") : existing.endAt;
+        checkRange(startAt, endAt);
 
-        // Lock on the target employee (may differ from existing employee).
-
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${nextEmployeeId}, 0))`;
+        // lock the NEW employee (could be different from the old one)
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${employeeId}, 0))`;
 
         if (dto.clientId !== undefined) {
-          await assertClientExists(tx, nextClientId);
+          await checkClient(tx, clientId);
         }
-        if (
+
+        const timeOrEmployeeChanged =
           dto.employeeId !== undefined ||
           dto.startAt !== undefined ||
-          dto.endAt !== undefined
-        ) {
-          await assertActiveEmployee(tx, nextEmployeeId);
-          await assertNoOverlap(tx, nextEmployeeId, nextStartAt, nextEndAt, id);
+          dto.endAt !== undefined;
+        if (timeOrEmployeeChanged) {
+          await checkEmployee(tx, employeeId);
+          await checkOverlap(tx, employeeId, startAt, endAt, id);
         }
 
         const data: Prisma.AppointmentUpdateInput = {};
         if (dto.clientId !== undefined)
-          data.client = { connect: { id: nextClientId } };
+          data.client = { connect: { id: clientId } };
         if (dto.employeeId !== undefined)
-          data.employee = { connect: { id: nextEmployeeId } };
-        if (dto.startAt !== undefined) data.startAt = nextStartAt;
-        if (dto.endAt !== undefined) data.endAt = nextEndAt;
+          data.employee = { connect: { id: employeeId } };
+        if (dto.startAt !== undefined) data.startAt = startAt;
+        if (dto.endAt !== undefined) data.endAt = endAt;
         if (dto.source !== undefined) data.source = dto.source;
         if (dto.status !== undefined) data.status = dto.status;
         if (dto.notes !== undefined) data.notes = dto.notes.trim() || null;
@@ -260,7 +237,13 @@ export class AppointmentsService {
         return tx.appointment.update({
           where: { id },
           data,
-          include: { client: true, employee: true, createdBy: true },
+          include: {
+            client: true,
+            employee: true,
+            createdBy: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
         });
       },
       { timeout: 10000 },
@@ -271,9 +254,7 @@ export class AppointmentsService {
     return this.prisma.$transaction(
       async (tx) => {
         const existing = await tx.appointment.findUnique({ where: { id } });
-        if (!existing) {
-          throw new NotFoundException("Appointment not found");
-        }
+        if (!existing) throw new NotFoundException("Appointment not found");
 
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${existing.employeeId}, 0))`;
 
@@ -284,16 +265,22 @@ export class AppointmentsService {
           throw new ConflictException("Cannot cancel a completed appointment");
         }
 
-        const notes = reason?.trim()
-          ? existing.notes
-            ? `${existing.notes}\nCancellation: ${reason.trim()}`
-            : `Cancellation: ${reason.trim()}`
-          : existing.notes;
+        let notes = existing.notes;
+        const r = reason?.trim();
+        if (r) {
+          notes = notes ? `${notes}\nCancellation: ${r}` : `Cancellation: ${r}`;
+        }
 
         return tx.appointment.update({
           where: { id },
           data: { status: AppointmentStatus.CANCELLED, notes },
-          include: { client: true, employee: true, createdBy: true },
+          include: {
+            client: true,
+            employee: true,
+            createdBy: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
         });
       },
       { timeout: 10000 },
