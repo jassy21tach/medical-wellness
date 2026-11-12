@@ -10,7 +10,6 @@ export class ClientsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateClientDto) {
-    // console.log("debug client", dto);
     return this.prisma.client.create({
       data: {
         firstName: dto.firstName.trim(),

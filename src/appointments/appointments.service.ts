@@ -45,8 +45,6 @@ async function checkEmployee(tx: Tx, employeeId: string) {
   if (!emp.active) throw new BadRequestException("Employee is inactive");
 }
 
-// cancelled ones dont block anything
-// 10-11 and 11-12 is fine (touching is not overlapping)
 async function checkOverlap(
   tx: Tx,
   employeeId: string,
@@ -92,7 +90,6 @@ export class AppointmentsService {
 
     return this.prisma.$transaction(
       async (tx) => {
-        // lock per employee so 2 requests at the same time cant take the same slot
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${dto.employeeId}, 0))`;
 
         await checkClient(tx, dto.clientId);
@@ -147,7 +144,6 @@ export class AppointmentsService {
       throw new BadRequestException("to must be later than from");
     }
 
-    // anything that touches the [from, to] window
     if (from || to) {
       where.AND = [
         ...(from ? [{ endAt: { gt: from } }] : []),
@@ -207,7 +203,6 @@ export class AppointmentsService {
         const endAt = dto.endAt ? toDate(dto.endAt, "endAt") : existing.endAt;
         checkRange(startAt, endAt);
 
-        // lock the NEW employee (could be different from the old one)
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${employeeId}, 0))`;
 
         if (dto.clientId !== undefined) {

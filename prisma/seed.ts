@@ -29,7 +29,6 @@ async function main(): Promise<void> {
   if (receptionEmail !== email) {
     const receptionPassword = process.env.SEED_RECEPTION_PASSWORD ?? EXAMPLE_DEV_PASSWORD;
     if (process.env.NODE_ENV === 'production' && receptionPassword === EXAMPLE_DEV_PASSWORD) {
-      // No-op in production: reception user is optional and not created with example password.
       console.warn('Skipping demo RECEPTION user in production (SEED_RECEPTION_PASSWORD not set).');
     } else {
       const receptionHash = await bcrypt.hash(receptionPassword, 12);
@@ -48,7 +47,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // Idempotent demo data — synthetic only, never real customer information.
   const demoClients = [
     { firstName: 'Amina', lastName: 'Bennani', phone: '+212600000001', email: 'amina.demo@example.local' },
     { firstName: 'Youssef', lastName: 'Alaoui', phone: '+212600000002', email: 'youssef.demo@example.local' },

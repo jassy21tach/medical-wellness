@@ -1,6 +1,3 @@
-// Medical Wellness — Prisma schema (PostgreSQL 16)
-// See docs/DATABASE.md for the full relational design.
-
 generator client {
   provider = "prisma-client-js"
 }

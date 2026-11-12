@@ -24,7 +24,6 @@ function makePrisma(overrides: Record<string, unknown> = {}) {
     ...mockTx,
     _mockTx: mockTx,
   } as unknown as PrismaService & { _mockTx: typeof mockTx };
-  // Apply overrides to mockTx
   for (const [k, v] of Object.entries(overrides)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockTx as any)[k] = v;
@@ -203,8 +202,6 @@ describe("AppointmentsService", () => {
     mockTx.appointment.findFirst.mockResolvedValue(null);
     mockTx.appointment.create.mockResolvedValue({ id: "apt-2" });
     const service = new AppointmentsService(prisma);
-    // Existing 10:00-11:00, new 11:00-12:00 — where clause with lt/gt excludes equality overlap implicitly
-    // The service sends startAt={lt:newEnd} and endAt={gt:newStart}; for newStart=11:00 existing end 11:00 is not > 11:00, so no match.
     const result = await service.create(
       {
         clientId: CLIENT_ID,

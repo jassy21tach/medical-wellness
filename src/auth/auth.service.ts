@@ -31,7 +31,6 @@ export class AuthService {
     const email = emailRaw.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    // Generic error to avoid user enumeraton.
     if (!user || !user.active) {
       throw new UnauthorizedException("Invalid credentials");
     }

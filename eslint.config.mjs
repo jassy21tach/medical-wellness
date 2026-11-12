@@ -1,4 +1,3 @@
-// ESLint flat config (ESLint 9). Minimal, strict TypeScript rules for the backend MVP.
 import eslint from '@eslint/js';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import globals from 'globals';
