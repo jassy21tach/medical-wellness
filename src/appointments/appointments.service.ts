@@ -76,7 +76,6 @@ export class AppointmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateAppointmentDto, createdById: string) {
-    // TODO working hours check, waiting for the client to tell us
     const startAt = toDate(dto.startAt, "startAt");
     const endAt = toDate(dto.endAt, "endAt");
     checkRange(startAt, endAt);
@@ -162,7 +161,6 @@ export class AppointmentsService {
       this.prisma.appointment.count({ where }),
     ]);
 
-    // console.log("appointments", data.length);
     return paginate(data, total, { page, limit });
   }
 

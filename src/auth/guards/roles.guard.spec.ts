@@ -7,7 +7,6 @@ function makeContext(user: { role: string } | undefined) {
     switchToHttp: () => ({ getRequest: () => ({ user }) }),
     getHandler: () => {},
     getClass: () => {},
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
 

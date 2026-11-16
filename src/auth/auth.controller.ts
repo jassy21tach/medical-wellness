@@ -6,7 +6,6 @@ import { LoginDto } from "./dto/login.dto";
 
 @ApiTags("Auth")
 @Controller("auth")
-// TODO: add rate limiting on login
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

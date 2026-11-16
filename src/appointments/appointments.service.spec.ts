@@ -25,7 +25,6 @@ function makePrisma(overrides: Record<string, unknown> = {}) {
     _mockTx: mockTx,
   } as unknown as PrismaService & { _mockTx: typeof mockTx };
   for (const [k, v] of Object.entries(overrides)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockTx as any)[k] = v;
   }
   return { prisma, mockTx };

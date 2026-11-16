@@ -32,11 +32,9 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(config.get<string>("PORT", "4000"));
   await app.listen(port);
-  // eslint-disable-next-line no-console
   console.log(
     `Medical Wellness API listening on http://localhost:${port}/api/v1`,
   );
-  // eslint-disable-next-line no-console
   console.log(`Swagger UI at http://localhost:${port}/api/docs`);
 }
 

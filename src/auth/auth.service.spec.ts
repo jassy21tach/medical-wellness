@@ -17,11 +17,8 @@ describe("AuthService", () => {
     const jwt = { signAsync: jest.fn().mockResolvedValue("fake-jwt") };
     const config = { get: jest.fn().mockReturnValue("1h") };
     const service = new AuthService(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       prisma as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       jwt as any as JwtService,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       config as any as ConfigService,
     );
     return { service, jwt, prisma };
